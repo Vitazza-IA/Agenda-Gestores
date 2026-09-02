@@ -451,27 +451,53 @@
     reader.readAsArrayBuffer(file);
   }
 
-  function processCsvText(text, filename){
-    const parsed = Papa.parse(text, { delimiter:';', skipEmptyLines:true });
-    const rows = parsed.data;
-    if(!rows.length){ alert('Não foi possível ler o CSV.'); return; }
-    const header = rows[0].map(normHead);
+  function findCol(header, nameVariants, fallbackIdx){
+    for(const v of nameVariants){
+      const idx = header.indexOf(normHead(v));
+      if(idx !== -1) return idx;
+    }
+    return fallbackIdx;
+  }
 
-    function findCol(nameVariants, fallbackIdx){
-      for(const v of nameVariants){
-        const idx = header.indexOf(normHead(v));
-        if(idx !== -1) return idx;
-      }
-      return fallbackIdx;
+  const EXPECTED_HEADERS = ['Data','Vr Produtos','Cliente - Razão Social','Código Representante','Representante','Supervisor'];
+
+  function tryParse(text, delimiter){
+    const parsed = Papa.parse(text, { delimiter, skipEmptyLines:true });
+    const rows = parsed.data;
+    if(!rows.length || rows[0].length < 2) return { rows, score:-1 };
+    const header = rows[0].map(normHead);
+    let score = 0;
+    EXPECTED_HEADERS.forEach(h => { if(header.indexOf(normHead(h)) !== -1) score++; });
+    return { rows, score };
+  }
+
+  function processCsvText(text, filename){
+    // auto-detect delimiter: the raw export uses ';', but files re-saved through
+    // Excel can end up with ',' depending on the machine's regional settings.
+    const candidates = [';', ',', '\t'];
+    let best = null;
+    candidates.forEach(d => {
+      const r = tryParse(text, d);
+      if(!best || r.score > best.score) best = Object.assign(r, {delimiter:d});
+    });
+
+    if(!best || best.score < 3){
+      alert('Não foi possível reconhecer as colunas do CSV. Confira se o arquivo é a exportação original do sistema (não editado/ressalvo pelo Excel) e tente novamente.');
+      uploadTitle.textContent = 'Importar CSV';
+      uploadSub.textContent = 'Exportação do sistema, mês corrente';
+      return;
     }
 
+    const rows = best.rows;
+    const header = rows[0].map(normHead);
+
     const col = {
-      data: findCol(['Data'], 1),
-      valor: findCol(['Vr Produtos','Vr. Produtos'], 4),
-      cliente: findCol(['Cliente - Razão Social','Cliente - Razao Social'], 12),
-      repCod: findCol(['Código Representante','Codigo Representante'], 15),
-      repNome: findCol(['Representante'], 16),
-      supervisor: findCol(['Supervisor'], 28)
+      data: findCol(header, ['Data'], 1),
+      valor: findCol(header, ['Vr Produtos','Vr. Produtos'], 4),
+      cliente: findCol(header, ['Cliente - Razão Social','Cliente - Razao Social'], 12),
+      repCod: findCol(header, ['Código Representante','Codigo Representante'], 15),
+      repNome: findCol(header, ['Representante'], 16),
+      supervisor: findCol(header, ['Supervisor'], 28)
     };
 
     const dataRows = rows.slice(1).filter(r => r.length > Math.max(...Object.values(col)));
